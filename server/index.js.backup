@@ -1,0 +1,456 @@
+const express = require('express');
+const cors = require('cors');
+require('dotenv').config();
+const supabase = require('./config/supabase');
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+app.use(cors());
+app.use(express.json());
+
+// Routes
+app.get('/', (req, res) => {
+    res.send('Cloud Quiz API is running');
+});
+
+// Get all quizzes (with optional filters)
+app.get('/api/quizzes', async (req, res) => {
+    const { category, difficulty, search } = req.query;
+    let query = supabase.from('quizzes').select('*');
+
+    if (category) query = query.eq('category', category);
+    if (difficulty) query = query.eq('difficulty', difficulty);
+    if (search) query = query.ilike('title', `%${search}%`);
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// Get questions for a quiz
+app.get('/api/quizzes/:id/questions', async (req, res) => {
+    const { id } = req.params;
+    const { data, error } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('quiz_id', id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// Submit result
+app.post('/api/results', async (req, res) => {
+    const { user_id, quiz_id, score } = req.body;
+
+    const { data, error } = await supabase
+        .from('results')
+        .insert([{ user_id, quiz_id, score }]);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+});
+
+// Get user results
+app.get('/api/results/:userId', async (req, res) => {
+    const { userId } = req.params;
+    const { data, error } = await supabase
+        .from('results')
+        .select('*, quizzes(title)')
+        .eq('user_id', userId);
+
+    const { data, error } = await supabase
+        .from('quizzes')
+        .insert([{ title, description, category, difficulty }])
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data[0]);
+});
+
+// Update a quiz
+app.put('/api/quizzes/:id', async (req, res) => {
+    const { id } = req.params;
+    const { title, description, category, difficulty, active } = req.body;
+    const { data, error } = await supabase
+        .from('quizzes')
+        .update({ title, description, category, difficulty, active })
+        .eq('id', id)
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+});
+
+// Delete a quiz
+app.delete('/api/quizzes/:id', async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase
+        .from('quizzes')
+        .delete()
+        .eq('id', id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ message: 'Quiz deleted' });
+});
+
+// --- Question Routes ---
+
+// Add a question to a quiz
+app.post('/api/questions', async (req, res) => {
+    const { quiz_id, question_text, options, correct_answer, explanation, time_limit } = req.body;
+    const { data, error } = await supabase
+        .from('questions')
+        .insert([{ quiz_id, question_text, options, correct_answer, explanation, time_limit }])
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data[0]);
+});
+
+// Update a question
+app.put('/api/questions/:id', async (req, res) => {
+    const { id } = req.params;
+    const { question_text, options, correct_answer, explanation, time_limit } = req.body;
+    const { data, error } = await supabase
+        .from('questions')
+        .update({ question_text, options, correct_answer, explanation, time_limit })
+        .eq('id', id)
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+});
+
+// Delete a question
+app.delete('/api/questions/:id', async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase
+        .from('questions')
+        .delete()
+        .eq('id', id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ message: 'Question deleted' });
+});
+
+// --- Category Routes ---
+
+// Get all categories
+app.get('/api/categories', async (req, res) => {
+    const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name');
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// Create category
+app.post('/api/categories', async (req, res) => {
+    const { name, description, icon, active } = req.body;
+    const { data, error } = await supabase
+        .from('categories')
+        .insert([{ name, description, icon, active }])
+        .select();
+
+    if (error) {
+        console.error('Error creating category:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.status(201).json(data[0]);
+});
+
+// Update category
+app.put('/api/categories/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, description, icon, active } = req.body;
+    const { data, error } = await supabase
+        .from('categories')
+        .update({ name, description, icon, active })
+        .eq('id', id)
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+});
+
+// Delete category
+app.delete('/api/categories/:id', async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('id', id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ message: 'Category deleted' });
+});
+
+// --- User Management ---
+
+// Get all users
+app.get('/api/users', async (req, res) => {
+    const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('Error fetching users:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
+});
+
+// Update user role or ban status
+app.put('/api/users/:id', async (req, res) => {
+    const { id } = req.params;
+    const { role, banned } = req.body;
+
+    const updateData = {};
+    if (role !== undefined) updateData.role = role;
+    if (banned !== undefined) updateData.banned = banned;
+
+    const { data, error } = await supabase
+        .from('users')
+        .update(updateData)
+        .eq('id', id)
+        .select();
+
+    if (error) {
+        console.error('Error updating user:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data[0]);
+});
+
+// --- Analytics ---
+
+// Get global analytics
+app.get('/api/analytics/overview', async (req, res) => {
+    try {
+        // Total users
+        const { count: totalUsers } = await supabase
+            .from('users')
+            .select('*', { count: 'exact', head: true });
+
+        // Total quizzes
+        const { count: totalQuizzes } = await supabase
+            .from('quizzes')
+            .select('*', { count: 'exact', head: true });
+
+        // Total quiz attempts
+        const { count: totalAttempts } = await supabase
+            .from('results')
+            .select('*', { count: 'exact', head: true });
+
+        // Average score
+        const { data: avgData } = await supabase
+            .from('results')
+            .select('score');
+
+        const avgScore = avgData && avgData.length > 0
+            ? avgData.reduce((sum, r) => sum + r.score, 0) / avgData.length
+            : 0;
+
+        res.json({
+            totalUsers: totalUsers || 0,
+            totalQuizzes: totalQuizzes || 0,
+            totalAttempts: totalAttempts || 0,
+            averageScore: Math.round(avgScore * 10) / 10
+        });
+    } catch (error) {
+        console.error('Error fetching analytics overview:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get quiz performance data
+app.get('/api/analytics/quiz-performance', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('results')
+            .select('quiz_id, score, quizzes(title)')
+            .order('completed_at', { ascending: false })
+            .limit(100);
+
+        if (error) throw error;
+
+        // Group by quiz and calculate stats
+        const quizStats = {};
+        data.forEach(result => {
+            const quizId = result.quiz_id;
+            const quizTitle = result.quizzes?.title || 'Unknown Quiz';
+
+            if (!quizStats[quizId]) {
+                quizStats[quizId] = {
+                    id: quizId,
+                    title: quizTitle,
+                    attempts: 0,
+                    totalScore: 0,
+                    scores: []
+                };
+            }
+
+            quizStats[quizId].attempts++;
+            quizStats[quizId].totalScore += result.score;
+            quizStats[quizId].scores.push(result.score);
+        });
+
+        // Calculate averages
+        const performanceData = Object.values(quizStats).map(quiz => ({
+            id: quiz.id,
+            title: quiz.title,
+            attempts: quiz.attempts,
+            averageScore: Math.round((quiz.totalScore / quiz.attempts) * 10) / 10,
+            highestScore: Math.max(...quiz.scores),
+            lowestScore: Math.min(...quiz.scores)
+        }));
+
+        res.json(performanceData);
+    } catch (error) {
+        console.error('Error fetching quiz performance:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get user activity over time (last 30 days)
+app.get('/api/analytics/user-activity', async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('results')
+            .select('completed_at')
+            .gte('completed_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+            .order('completed_at', { ascending: true });
+
+        if (error) throw error;
+
+        // Group by date
+        const activityByDate = {};
+        data.forEach(result => {
+            const date = new Date(result.completed_at).toISOString().split('T')[0];
+            activityByDate[date] = (activityByDate[date] || 0) + 1;
+        });
+
+        // Convert to array format for charts
+        const activityData = Object.entries(activityByDate).map(([date, count]) => ({
+            date,
+            attempts: count
+        }));
+
+        res.json(activityData);
+    } catch (error) {
+        console.error('Error fetching user activity:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// --- Achievements ---
+
+// Get all achievements
+app.get('/api/achievements', async (req, res) => {
+    const { data, error } = await supabase
+        .from('achievements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error('Error fetching achievements:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
+});
+
+// Create achievement
+app.post('/api/achievements', async (req, res) => {
+    const { name, description, xp_reward, icon } = req.body;
+    const { data, error } = await supabase
+        .from('achievements')
+        .insert([{ name, description, xp_reward, icon }])
+        .select();
+
+    if (error) {
+        console.error('Error creating achievement:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.status(201).json(data[0]);
+});
+
+// Update achievement
+app.put('/api/achievements/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, description, xp_reward, icon } = req.body;
+    const { data, error } = await supabase
+        .from('achievements')
+        .update({ name, description, xp_reward, icon })
+        .eq('id', id)
+        .select();
+
+    if (error) {
+        console.error('Error updating achievement:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data[0]);
+});
+
+// Delete achievement
+app.delete('/api/achievements/:id', async (req, res) => {
+    const { id } = req.params;
+    const { error } = await supabase
+        .from('achievements')
+        .delete()
+        .eq('id', id);
+
+    if (error) {
+        console.error('Error deleting achievement:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json({ message: 'Achievement deleted' });
+});
+
+// --- App Settings ---
+
+// Get all settings
+app.get('/api/settings', async (req, res) => {
+    const { data, error } = await supabase
+        .from('app_settings')
+        .select('*');
+
+    if (error) {
+        console.error('Error fetching settings:', error);
+        return res.status(500).json({ error: error.message });
+    }
+
+    // Convert array to object for easier frontend consumption
+    const settings = {};
+    data.forEach(setting => {
+        settings[setting.key] = setting.value;
+    });
+
+    res.json(settings);
+});
+
+// Update a setting
+app.put('/api/settings/:key', async (req, res) => {
+    const { key } = req.params;
+    const { value } = req.body;
+
+    const { data, error } = await supabase
+        .from('app_settings')
+        .upsert({ key, value, updated_at: new Date().toISOString() })
+        .select();
+
+    if (error) {
+        console.error('Error updating setting:', error);
+        return res.status(500).json({ error: error.message });
+    }
+    res.json(data[0]);
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+});
